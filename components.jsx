@@ -107,11 +107,17 @@ function Button({ kind = "primary", size = "md", href, children, icon, onClick, 
 /* ─────────────────────────────────────────────────────────────
    STATUS PILL — open / limited / closed
    ───────────────────────────────────────────────────────────── */
-function StatusPill({ status, onDark = false }) {
+function StatusPill({ status, onDark = false, label }) {
+  // All four states read from CSS vars defined per theme in index.html. The
+  // dark themes attach a glow via --status-*-glow so open/limited stay
+  // legible against the dark surface, matching ych/closed.
+  // The legacy `onDark` prop is accepted but ignored — kept so external
+  // callers don't break.
   const cfg = {
-    open: { dot: "#9bc474", label: "Commissions open", bg: onDark ? "rgba(155,196,116,0.18)" : "rgba(122,160,92,0.12)", color: onDark ? "#c8e0a4" : "#3f5a26" },
-    limited: { dot: "var(--gold)", label: "Limited slots", bg: onDark ? "rgba(240,191,89,0.18)" : "var(--gold-tint)", color: onDark ? "var(--gold)" : "#6b4d12" },
-    closed: { dot: "#c4c2c0", label: "Commissions closed", bg: onDark ? "rgba(252,239,240,0.12)" : "rgba(168,166,164,0.18)", color: onDark ? "rgba(252,239,240,0.85)" : "var(--charcoal)" },
+    open:    { dot: "var(--status-open-dot)",    label: "Commissions open",   bg: "var(--status-open-bg)",    color: "var(--status-open-color)",    border: "var(--status-open-border)",    glow: "var(--status-open-glow)" },
+    limited: { dot: "var(--status-limited-dot)", label: "Limited slots",      bg: "var(--status-limited-bg)", color: "var(--status-limited-color)", border: "var(--status-limited-border)", glow: "var(--status-limited-glow)" },
+    ych:     { dot: "var(--status-ych-dot)",     label: "YCH slots open",     bg: "var(--status-ych-bg)",     color: "var(--status-ych-color)",     border: "var(--status-ych-border)",     glow: "var(--status-ych-glow, none)" },
+    closed:  { dot: "var(--status-closed-dot)",  label: "Commissions closed", bg: "var(--status-closed-bg)",  color: "var(--status-closed-color)",  border: "var(--status-closed-border)",  glow: "var(--status-closed-glow, none)" },
   }[status] || {};
   return (
     <span style={{
@@ -119,15 +125,17 @@ function StatusPill({ status, onDark = false }) {
       padding: "6px 12px 6px 10px",
       borderRadius: "var(--r-pill)",
       background: cfg.bg, color: cfg.color,
+      border: `1px solid ${cfg.border || "transparent"}`,
+      boxShadow: cfg.glow || "none",
       fontSize: 13, fontWeight: 600, letterSpacing: "0.01em",
-      border: onDark ? "1px solid rgba(252,239,240,0.12)" : "1px solid rgba(62,63,65,0.06)",
+      transition: "background var(--d-3) var(--ease-out), color var(--d-3) var(--ease-out), border-color var(--d-3) var(--ease-out), box-shadow var(--d-3) var(--ease-out)",
     }}>
       <span style={{
         width: 8, height: 8, borderRadius: 999, background: cfg.dot,
         boxShadow: status === "open" ? "0 0 0 0 rgba(122,160,92,0.5)" : "none",
         animation: status === "open" ? "pill-pulse 2.4s ease-out infinite" : "none",
       }} />
-      {cfg.label}
+      {label != null ? label : cfg.label}
     </span>
   );
 }

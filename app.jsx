@@ -4,6 +4,242 @@
 const { useState, useEffect, useRef } = React;
 
 /* ─────────────────────────────────────────────────────────────
+   ADMIN AUTH — basic protection, hardcoded per spec.
+   Not a security boundary: the password is in the source. It only
+   gates the tweaks panel UI from casual visitors.
+   ───────────────────────────────────────────────────────────── */
+const ADMIN_PASSWORD = "corujinha";
+const AUTH_STORAGE_KEY = "ruzowl_admin_authed";
+const LANG_STORAGE_KEY = "ruzowl_lang";
+
+/* ─────────────────────────────────────────────────────────────
+   GLOBAL PUBLISH (GitHub Pages)
+   The site is hosted statically on GitHub Pages, so admin tweaks
+   need a way to reach all visitors. The pattern: a small JSON
+   file at /data/commissions.json acts as the source of truth.
+   On load, every visitor fetches it and merges into tweaks.
+   When the admin saves, the panel commits the new JSON via the
+   GitHub Contents API using a fine-grained PAT stored ONLY in
+   the admin's own browser (localStorage). After ~1 minute GitHub
+   Pages redeploys and visitors see the new state.
+   ───────────────────────────────────────────────────────────── */
+const GITHUB_REPO = "UnusualHatter/ruzowl-portfolio";  // owner/repo — edit if forked
+const GITHUB_BRANCH = "main";
+const COMMISSIONS_FILE = "data/commissions.json";
+const PAT_STORAGE_KEY = "ruzowl_gh_pat";
+// Subset of tweak keys that get pushed to the public JSON. Visual personality
+// (sparkles, shimmer, tilt) and per-visitor prefs (dark, nsfw, lang) stay local.
+const PUBLISHED_KEYS = ["status", "slotsCurrent", "slotsMax", "iconPrice", "halfbodyPrice", "fullbodyPrice"];
+
+async function loadRemoteCommissions() {
+  try {
+    const r = await fetch(`${COMMISSIONS_FILE}?t=${Date.now()}`, { cache: "no-store" });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
+  }
+}
+
+async function publishToGitHub(values, pat) {
+  const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${COMMISSIONS_FILE}`;
+  const headers = {
+    "Authorization": `Bearer ${pat}`,
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  // Need the existing file's SHA for an update; absent SHA means "create new".
+  let sha;
+  const getRes = await fetch(`${url}?ref=${GITHUB_BRANCH}&t=${Date.now()}`, { headers, cache: "no-store" });
+  if (getRes.ok) {
+    sha = (await getRes.json()).sha;
+  } else if (getRes.status !== 404) {
+    throw new Error(`Read failed (HTTP ${getRes.status})`);
+  }
+  const json = JSON.stringify(values, null, 2) + "\n";
+  // btoa(unescape(encodeURIComponent(...))) is the standard trick to base64
+  // arbitrary UTF-8 (raw btoa chokes on non-Latin1 bytes like emoji).
+  const content = btoa(unescape(encodeURIComponent(json)));
+  const body = {
+    message: `chore(commissions): status=${values.status} slots=${values.slotsCurrent ?? "?"}/${values.slotsMax ?? "?"}`,
+    content,
+    branch: GITHUB_BRANCH,
+  };
+  if (sha) body.sha = sha;
+  const putRes = await fetch(url, {
+    method: "PUT",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!putRes.ok) {
+    const txt = await putRes.text().catch(() => "");
+    throw new Error(`HTTP ${putRes.status} ${txt.slice(0, 160)}`);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   I18N — EN / PT-BR copy. Component-scoped sub-objects so each
+   section reads from t.<section>.<key>. Keep keys identical
+   across languages or callers will render undefined.
+   ───────────────────────────────────────────────────────────── */
+const TEXT = {
+  en: {
+    nav: {
+      gallery: "Gallery",
+      prices: "Prices",
+      commissions: "Comissions",
+      switchSfw: "Switch to SFW mode",
+      switchNsfw: "Switch to NSFW mode",
+      switchDark: "Switch to dark mode",
+      switchLight: "Switch to light mode",
+      switchLang: "Switch to Portuguese",
+    },
+    hero: {
+      badge: "RuzOwl · digital illustrator",
+      h1Hi: "Hi, I'm",
+      h1Mid: "I draw",
+      h1Fluffy: "fluffy animals",
+      intro: "I'm Ruz! — a furry digital illustrator creating cute and expressive anthropomorphic characters.\nI specialize in commissions.",
+      btnPrices: "View prices",
+      btnGallery: "See gallery",
+      seePrices: "See prices",
+      sticker: "Hoot-hoot!",
+    },
+    gallery: {
+      kicker: "Gallery",
+      title: "Recent works",
+      sub: (n) => `${n} pieces at the moment · click any to full view`,
+      archive: "full archive on twitter →",
+      modalClose: "Close",
+      modalPrev: "Previous",
+      modalNext: "Next",
+    },
+    prices: {
+      kicker: "Pricing",
+      title: "Comission Prices",
+      sub: "Prices in BRL (Brazil) or USD (International). The numerical value remains the same for both currencies.",
+      tiers: {
+        icon: { name: "Icon", blurb: "Social-media-ready avatar. Headshot with full rendering.", bullets: ["Full shading", "Headshot Portrait"] },
+        halfbody: { name: "Half body", blurb: "Half body render of your character, full shading.", bullets: ["Full shading", "Half body portrait", "Simple or Detailed background"] },
+        fullbody: { name: "Full body", blurb: "Full render of your character from head to toe.", bullets: ["Full shading", "Full body portrait", "Simple or Detailed background"] },
+      },
+    },
+    socials: {
+      kicker: "Socials",
+      title: "Where to find me",
+      sub: "The home of my WIPs and funny art + a lot of 🦉 things.",
+    },
+    status: {
+      open: "Commissions open",
+      limited: "Limited slots",
+      ych: "YCH slots open",
+      closed: "Commissions closed",
+      slotsSuffix: (cur, max) => ` · ${cur}/${max} slots`,
+    },
+    admin: {
+      sectionLogin: "Admin login",
+      placeholder: "Password",
+      loginBtn: "Login",
+      logoutBtn: "Logout",
+      errorMsg: "Incorrect password",
+      sectionCommissions: "Commissions",
+      sectionPrices: "Prices",
+      labelStatus: "Status",
+      labelSlotsCur: "Current slots",
+      labelSlotsMax: "Max slots",
+      labelIconPrice: "Icon price",
+      labelHalfbodyPrice: "Half body price",
+      labelFullbodyPrice: "Full body price",
+      sectionPublish: "Publish to site",
+      labelPat: "GitHub token",
+      publishBtn: "Publish settings",
+      publishBusy: "Publishing…",
+      publishOk: "Published! Live in ~1 min.",
+      publishNoToken: "Add a GitHub token first.",
+      publishErr: "Publish failed",
+      publishHint: "Token saved locally; never sent to visitors. Use a classic PAT with 'repo' scope, or a fine-grained PAT with 'Contents: Read and write' on this repo.",
+    },
+  },
+  pt: {
+    nav: {
+      gallery: "Galeria",
+      prices: "Preços",
+      commissions: "Comissões",
+      switchSfw: "Mudar para modo SFW",
+      switchNsfw: "Mudar para modo NSFW",
+      switchDark: "Mudar para modo escuro",
+      switchLight: "Mudar para modo claro",
+      switchLang: "Mudar para inglês",
+    },
+    hero: {
+      badge: "RuzOwl · ilustrador digital",
+      h1Hi: "Oi, eu sou o",
+      h1Mid: "Eu desenho",
+      h1Fluffy: "bichinhos fofos",
+      intro: "Sou o Ruz! — um ilustrador digital furry criando personagens antropomórficos fofos e expressivos.\nMinha especialidade são comissões.",
+      btnPrices: "Ver preços",
+      btnGallery: "Ver galeria",
+      seePrices: "Ver preços",
+      sticker: "Hoot-hoot!",
+    },
+    gallery: {
+      kicker: "Galeria",
+      title: "Trabalhos recentes",
+      sub: (n) => `${n} peças no momento · clique pra ver inteira`,
+      archive: "arquivo completo no twitter →",
+      modalClose: "Fechar",
+      modalPrev: "Anterior",
+      modalNext: "Próxima",
+    },
+    prices: {
+      kicker: "Preços",
+      title: "Preços de Comissões",
+      sub: "Preços em BRL (Brasil) ou USD (Internacional). O valor numérico é o mesmo para ambas moedas.",
+      tiers: {
+        icon: { name: "Ícone", blurb: "Avatar pronto pra redes sociais. Headshot com renderização completa.", bullets: ["Sombreamento completo", "Retrato headshot"] },
+        halfbody: { name: "Meio corpo", blurb: "Renderização de meio corpo do seu personagem, com sombreamento completo.", bullets: ["Sombreamento completo", "Retrato meio corpo", "Fundo simples ou detalhado"] },
+        fullbody: { name: "Corpo inteiro", blurb: "Renderização completa do seu personagem da cabeça aos pés.", bullets: ["Sombreamento completo", "Retrato corpo inteiro", "Fundo simples ou detalhado"] },
+      },
+    },
+    socials: {
+      kicker: "Redes",
+      title: "Onde me achar",
+      sub: "O cantinho dos meus WIPs e arte engraçada + muita coisa de 🦉.",
+    },
+    status: {
+      open: "Comissões abertas",
+      limited: "Vagas limitadas",
+      ych: "Vagas YCH abertas",
+      closed: "Comissões fechadas",
+      slotsSuffix: (cur, max) => ` · ${cur}/${max} vagas`,
+    },
+    admin: {
+      sectionLogin: "Login admin",
+      placeholder: "Senha",
+      loginBtn: "Entrar",
+      logoutBtn: "Sair",
+      errorMsg: "Senha incorreta",
+      sectionCommissions: "Comissões",
+      sectionPrices: "Preços",
+      labelStatus: "Status",
+      labelSlotsCur: "Vagas atuais",
+      labelSlotsMax: "Vagas máximas",
+      labelIconPrice: "Preço do ícone",
+      labelHalfbodyPrice: "Preço meio corpo",
+      labelFullbodyPrice: "Preço corpo inteiro",
+      sectionPublish: "Publicar no site",
+      labelPat: "Token do GitHub",
+      publishBtn: "Publicar configurações",
+      publishBusy: "Publicando…",
+      publishOk: "Publicado! No ar em ~1 min.",
+      publishNoToken: "Adicione um token do GitHub primeiro.",
+      publishErr: "Falha ao publicar",
+      publishHint: "Token salvo localmente; nunca enviado a visitantes. Use um PAT clássico com escopo 'repo' ou um PAT refinado com 'Contents: Read and write' neste repo.",
+    },
+  },
+};
+
+/* ─────────────────────────────────────────────────────────────
    CONTENT — sourced from repo data + spec
    ───────────────────────────────────────────────────────────── */
 const ARTIST = {
@@ -77,18 +313,31 @@ const GALLERY_NSFW = [
 /* ─────────────────────────────────────────────────────────────
    NAV
    ───────────────────────────────────────────────────────────── */
-function Nav({ status, dark, onToggleDark, nsfw, onToggleNsfw }) {
+function Nav({ status, slotsCurrent, slotsMax, dark, onToggleDark, nsfw, onToggleNsfw, lang, onToggleLang, t }) {
   const [scrolled, setScrolled] = useState(false);
-  const [openMobile, setOpenMobile] = useState(false);
+  // pulseKey re-mounts the ripple span on every click so the CSS animation re-triggers
+  const [pulseKey, setPulseKey] = useState(0);
+  const [isPulsing, setIsPulsing] = useState(false);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
     onScroll(); window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-  const items = [
-    { href: "#gallery", label: "Gallery" },
-    { href: "#prices", label: "Prices" },
-  ];
+  const handleNsfwClick = () => {
+    setPulseKey((k) => k + 1);
+    setIsPulsing(true);
+    onToggleNsfw();
+    window.setTimeout(() => setIsPulsing(false), 620);
+  };
+  // Build the status pill label: base copy from current language; append slot
+  // count when the status exposes availability numbers.
+  const statusLabel = (() => {
+    const base = t.status[status] || "";
+    if ((status === "limited" || status === "ych") && typeof slotsCurrent === "number" && typeof slotsMax === "number") {
+      return base + t.status.slotsSuffix(slotsCurrent, slotsMax);
+    }
+    return base;
+  })();
   return (
     <header style={{
       position: "sticky", top: 0, zIndex: 100,
@@ -103,7 +352,7 @@ function Nav({ status, dark, onToggleDark, nsfw, onToggleNsfw }) {
       }}>
         <a href="#top" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <img src="assets/ruz.png" alt="" width={34} height={34} style={{ borderRadius: 10, objectFit: "cover" }} />
-          <span style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 20, letterSpacing: "-0.02em" }}>
+          <span className="nav-logo-text" style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 20, letterSpacing: "-0.02em" }}>
             RuzOwl
           </span>
         </a>
@@ -117,46 +366,57 @@ function Nav({ status, dark, onToggleDark, nsfw, onToggleNsfw }) {
             }}
               onMouseEnter={(e) => e.currentTarget.style.background = "rgba(62,63,65,0.06)"}
               onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
-            >Gallery</a>
+            >{t.nav.gallery}</a>
           </nav>
 
           <button
-            onClick={onToggleNsfw}
+            className={"nav-nsfw-toggle" + (isPulsing ? " is-pulsing" : "")}
+            onClick={handleNsfwClick}
+            aria-label={nsfw ? t.nav.switchSfw : t.nav.switchNsfw}
+            aria-pressed={nsfw}
             style={{
-              padding: "4px 6px",
-              background: nsfw ? "var(--purple)" : "var(--surface)",
-              color: nsfw ? "#fff" : "var(--gray)",
-              border: "1px solid " + (nsfw ? "var(--purple)" : "rgba(62,63,65,0.12)"),
-              borderRadius: "var(--r-pill)",
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: "0.05em",
-              display: "flex",
+              display: "inline-flex",
               alignItems: "center",
-              gap: 6,
+              gap: 7,
+              padding: "0 14px 0 7px",
+              height: 38,
+              background: nsfw ? "var(--purple)" : "var(--surface)",
+              color: nsfw ? "#fff" : "var(--text-muted)",
+              border: "1px solid " + (nsfw ? "var(--purple)" : "rgba(62,63,65,0.08)"),
+              borderRadius: "var(--r-pill)",
               boxShadow: nsfw ? "var(--shadow-glow-purple)" : "var(--shadow-sm)",
-              transition: "all var(--d-2) var(--ease-squish)",
+              transition: "background var(--d-3) var(--ease-out), color var(--d-3) var(--ease-out), border-color var(--d-3) var(--ease-out), box-shadow var(--d-3) var(--ease-out), transform var(--d-2) var(--ease-squish)",
               cursor: "pointer",
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              position: "relative",
             }}
-            onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.05)"}
-            onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+            onMouseEnter={(e) => { if (!isPulsing) e.currentTarget.style.transform = "scale(1.04)"; }}
+            onMouseLeave={(e) => { if (!isPulsing) e.currentTarget.style.transform = "scale(1)"; }}
           >
-            <div style={{
-              width: 24, height: 24, borderRadius: "50%",
-              background: nsfw ? "#fff" : "var(--purple-tint)",
-              color: nsfw ? "var(--purple)" : "var(--purple)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 10,
-              transition: "all var(--d-2) var(--ease-out)",
-              transform: nsfw ? "translateX(28px)" : "translateX(0)",
-            }}>
-              {nsfw ? "!" : "18"}
-            </div>
+            {pulseKey > 0 && <span key={pulseKey} aria-hidden className="nsfw-ripple" />}
             <span style={{
-              padding: "0 8px",
-              order: nsfw ? -1 : 1,
-              transition: "all var(--d-2) var(--ease-out)",
-              opacity: 0.8
+              width: 26, height: 26,
+              borderRadius: "50%",
+              background: nsfw ? "rgba(255,255,255,0.2)" : "var(--purple-tint)",
+              color: nsfw ? "#fff" : "var(--purple)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 9,
+              fontWeight: 700,
+              flexShrink: 0,
+              transition: "background var(--d-3) var(--ease-out), color var(--d-3) var(--ease-out)",
+              position: "relative",
+              zIndex: 1,
+            }}>18</span>
+            <span style={{
+              transition: "opacity var(--d-2) var(--ease-out)",
+              position: "relative",
+              zIndex: 1,
             }}>
               {nsfw ? "NSFW" : "SFW"}
             </span>
@@ -170,17 +430,43 @@ function Nav({ status, dark, onToggleDark, nsfw, onToggleNsfw }) {
             }}
               onMouseEnter={(e) => e.currentTarget.style.background = "rgba(62,63,65,0.06)"}
               onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
-            >Prices</a>
+            >{t.nav.prices}</a>
           </nav>
         </div>
 
         <div className="nav-cta" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <StatusPill status={status} />
+          <span className="nav-status-pill"><StatusPill status={status} label={statusLabel} /></span>
+          <button
+            type="button"
+            className="nav-lang-toggle"
+            onClick={onToggleLang}
+            aria-label={t.nav.switchLang}
+            title={t.nav.switchLang}
+            style={{
+              minWidth: 38, height: 38, padding: "0 10px",
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              background: "var(--surface)",
+              color: "var(--charcoal)",
+              border: "1px solid rgba(62,63,65,0.08)",
+              borderRadius: "var(--r-pill)",
+              boxShadow: "var(--shadow-sm)",
+              cursor: "pointer",
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.06em",
+              transition: "transform var(--d-2) var(--ease-squish), background var(--d-2) var(--ease-out), color var(--d-2) var(--ease-out)",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.06)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+          >
+            {lang === "en" ? "EN" : "PT"}
+          </button>
           <button
             type="button"
             onClick={onToggleDark}
-            aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-            title={dark ? "Light mode" : "Dark mode"}
+            aria-label={dark ? t.nav.switchLight : t.nav.switchDark}
+            title={dark ? t.nav.switchLight : t.nav.switchDark}
             style={{
               width: 38, height: 38,
               display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -217,13 +503,18 @@ function Nav({ status, dark, onToggleDark, nsfw, onToggleNsfw }) {
               <Icon.Moon width={18} height={18} />
             </span>
           </button>
-          <Button kind="primary" size="sm" href="#prices" icon={<Icon.Arrow width={14} height={14} />}>Comissions</Button>
+          <Button kind="primary" size="sm" href="#prices" icon={<Icon.Arrow width={14} height={14} />}>{t.nav.commissions}</Button>
         </div>
       </div>
       <style>{`
         @media (max-width: 820px) {
           .nav-links { display: none !important; }
-          .nav-cta > :first-child { display: none; }
+          .nav-logo-text { display: none !important; }
+          .nav-status-pill { display: none !important; }
+          .nav-cta { gap: 8px !important; }
+        }
+        @media (max-width: 480px) {
+          .nav-nsfw-toggle { padding: 0 10px 0 5px !important; font-size: 10px !important; }
         }
       `}</style>
     </header>
@@ -233,13 +524,14 @@ function Nav({ status, dark, onToggleDark, nsfw, onToggleNsfw }) {
 /* ─────────────────────────────────────────────────────────────
    HERO
    ───────────────────────────────────────────────────────────── */
-function Hero({ tweaks }) {
+function Hero({ tweaks, t }) {
   return (
     <section id="top" style={{ position: "relative", paddingBottom: "var(--s-9)" }}>
       {/* soft decorative blob behind hero */}
       <div aria-hidden style={{
         position: "absolute", inset: "auto 0 0 0", height: 480, top: 60,
-        background: "radial-gradient(60% 60% at 30% 40%, rgba(143,43,163,0.10) 0%, rgba(143,43,163,0) 60%), radial-gradient(50% 60% at 80% 30%, rgba(240,191,89,0.18) 0%, rgba(240,191,89,0) 60%)",
+        background: "var(--hero-blob)",
+        transition: "background var(--d-4) var(--ease-out)",
         pointerEvents: "none",
       }} />
       <div className="container" style={{
@@ -252,7 +544,7 @@ function Hero({ tweaks }) {
       }}>
         <div className="reveal in" style={{ minWidth: 0 }}>
           <Badge tone="purple" icon={<Icon.Spark width={12} height={12} />}>
-            RuzOwl · digital illustrator
+            {t.hero.badge}
           </Badge>
           <h1 style={{
             fontFamily: "var(--font-display)",
@@ -264,26 +556,26 @@ function Hero({ tweaks }) {
             color: "var(--charcoal)",
             textWrap: "pretty",
           }}>
-            Hi, I'm{" "}
+            {t.hero.h1Hi}{" "}
             <span style={{ fontStyle: "italic", color: "var(--purple)", fontWeight: 600 }}>Ruz</span>
             <span style={{ color: "var(--gold-deep)" }}>.</span>
             <br />
-            I draw{" "}
+            {t.hero.h1Mid}{" "}
             <span style={{
               background: "linear-gradient(180deg, transparent 60%, var(--gold-tint) 60%)",
               padding: "0 4px",
-            }}>fluffy animals</span>.
+            }}>{t.hero.h1Fluffy}</span>.
           </h1>
           <p style={{
             fontSize: 18, lineHeight: 1.55, color: "var(--gray)",
             maxWidth: 540, margin: "0 0 var(--s-6)",
             whiteSpace: "pre-wrap",
           }}>
-            {ARTIST.intro}
+            {t.hero.intro}
           </p>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-            <Button kind="primary" size="lg" href="#prices" icon={<Icon.Arrow width={16} height={16} />}>View prices</Button>
-            <Button kind="ghost" size="lg" href="#gallery" icon={<Icon.Image width={16} height={16} />}>See gallery</Button>
+            <Button kind="primary" size="lg" href="#prices" icon={<Icon.Arrow width={16} height={16} />}>{t.hero.btnPrices}</Button>
+            <Button kind="ghost" size="lg" href="#gallery" icon={<Icon.Image width={16} height={16} />}>{t.hero.btnGallery}</Button>
           </div>
         </div>
 
@@ -326,7 +618,7 @@ function Hero({ tweaks }) {
                 display: "inline-flex", gap: 6, alignItems: "center",
               }}>
                 <span style={{ width: 6, height: 6, borderRadius: 999, background: "#7aa05c" }} />
-                Hoot-hoot!
+                {t.hero.sticker}
               </div>
             </div>
             {/* gold tag — links to pricesheet */}
@@ -344,7 +636,7 @@ function Hero({ tweaks }) {
               onMouseEnter={(e) => { e.currentTarget.style.transform = "rotate(8deg) scale(1.06)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.transform = "rotate(8deg)"; }}
             >
-              ✦ See prices
+              ✦ {t.hero.seePrices}
             </a>
           </div>
         </div>
@@ -387,10 +679,58 @@ function SectionHeader({ kicker, title, sub, align = "left" }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   GALLERY — masonry-ish using grid spans
+   GALLERY MODAL — full-screen image viewer.
+   Mounted inline by Gallery (no portal needed; section has no
+   transform ancestor so position:fixed escapes correctly).
    ───────────────────────────────────────────────────────────── */
-function Gallery({ nsfw }) {
+function GalleryModal({ items, index, onClose, onPrev, onNext, t }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft") onPrev();
+      else if (e.key === "ArrowRight") onNext();
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose, onPrev, onNext]);
+
+  if (index == null || index < 0 || index >= items.length) return null;
+  const item = items[index];
+  const stop = (e) => e.stopPropagation();
+
+  return (
+    <div className="img-modal" onClick={onClose} role="dialog" aria-modal="true" aria-label={item.label}>
+      <button className="img-modal-close" onClick={(e) => { stop(e); onClose(); }} aria-label={t.gallery.modalClose}>✕</button>
+      <button className="img-modal-nav prev" onClick={(e) => { stop(e); onPrev(); }} aria-label={t.gallery.modalPrev}>‹</button>
+      <button className="img-modal-nav next" onClick={(e) => { stop(e); onNext(); }} aria-label={t.gallery.modalNext}>›</button>
+      <figure className="img-modal-fig" onClick={stop}>
+        <img src={item.src} alt={item.label} />
+        <figcaption>
+          {item.label}
+          <span>/{String(index + 1).padStart(2, "0")}</span>
+        </figcaption>
+      </figure>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   GALLERY — masonry-ish using CSS columns
+   ───────────────────────────────────────────────────────────── */
+function Gallery({ nsfw, t }) {
   const order = nsfw ? GALLERY_NSFW : GALLERY_SFW;
+  const [openIdx, setOpenIdx] = useState(null);
+  // Reset modal when toggling SFW/NSFW so we never index into the wrong list.
+  useEffect(() => { setOpenIdx(null); }, [nsfw]);
+
+  const close = () => setOpenIdx(null);
+  const prev = () => setOpenIdx((i) => (i == null ? null : (i - 1 + order.length) % order.length));
+  const next = () => setOpenIdx((i) => (i == null ? null : (i + 1) % order.length));
 
   return (
     <section id="gallery" style={{ padding: "var(--s-9) 0", background: "var(--cream)", position: "relative", overflow: "hidden" }}>
@@ -406,7 +746,7 @@ function Gallery({ nsfw }) {
 
       <div className="container" style={{ position: "relative" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16, marginBottom: "var(--s-6)" }}>
-          <SectionHeader kicker="Gallery" title="Recent works" sub={`${order.length} pieces at the moment · click any to full view`} />
+          <SectionHeader kicker={t.gallery.kicker} title={t.gallery.title} sub={t.gallery.sub(order.length)} />
           <a href="https://x.com/ruzowl07" target="_blank" rel="noreferrer" style={{
             fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--gray)",
             textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 8,
@@ -417,15 +757,15 @@ function Gallery({ nsfw }) {
             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--purple)"; e.currentTarget.style.borderColor = "var(--purple)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.color = "var(--gray)"; e.currentTarget.style.borderColor = "rgba(62,63,65,0.18)"; }}
           >
-            full archive on twitter →
+            {t.gallery.archive}
           </a>
         </div>
 
         <div className="gallery-masonry">
           {order.map((g, i) => (
-            <a key={i} href={g.src} target="_blank" rel="noreferrer" className="reveal g-item" style={{
+            <button key={i} type="button" onClick={() => setOpenIdx(i)} className="reveal g-item" style={{
               ["--reveal-delay"]: `${i * 50}ms`,
-            }}>
+            }} aria-label={g.label}>
               <div className="g-frame">
                 <img src={g.src} alt={g.label} loading="lazy" />
                 <div className="g-overlay">
@@ -433,10 +773,14 @@ function Gallery({ nsfw }) {
                   <span className="g-num">/{String(i + 1).padStart(2, "0")}</span>
                 </div>
               </div>
-            </a>
+            </button>
           ))}
         </div>
       </div>
+
+      {openIdx != null && (
+        <GalleryModal items={order} index={openIdx} onClose={close} onPrev={prev} onNext={next} t={t} />
+      )}
 
       <style>{`
         .gallery-masonry {
@@ -449,12 +793,122 @@ function Gallery({ nsfw }) {
 
         .g-item {
           display: block;
+          width: 100%;
           break-inside: avoid;
           -webkit-column-break-inside: avoid;
           page-break-inside: avoid;
           margin: 0 0 var(--s-3) 0;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          color: inherit;
+          font: inherit;
+          text-align: left;
           text-decoration: none;
           cursor: zoom-in;
+        }
+        .g-item:focus-visible {
+          outline: 2px solid var(--purple);
+          outline-offset: 4px;
+          border-radius: var(--r-lg);
+        }
+
+        /* ─── Full-screen image modal ─── */
+        @keyframes img-modal-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        @keyframes img-modal-zoom {
+          from { transform: scale(0.94); opacity: 0; }
+          to   { transform: scale(1);    opacity: 1; }
+        }
+        .img-modal {
+          position: fixed;
+          inset: 0;
+          z-index: 200;
+          background: rgba(20, 12, 14, 0.78);
+          -webkit-backdrop-filter: blur(14px) saturate(140%);
+          backdrop-filter: blur(14px) saturate(140%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 4vh 4vw;
+          animation: img-modal-in 220ms var(--ease-out);
+          cursor: zoom-out;
+        }
+        .img-modal-fig {
+          position: relative;
+          margin: 0;
+          max-width: 92vw;
+          max-height: 92vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 12px;
+          animation: img-modal-zoom 320ms var(--ease-squish);
+          cursor: default;
+        }
+        .img-modal-fig img {
+          display: block;
+          max-width: 92vw;
+          max-height: 84vh;
+          object-fit: contain;
+          border-radius: var(--r-lg);
+          box-shadow: 0 24px 80px rgba(0,0,0,0.55);
+        }
+        .img-modal-fig figcaption {
+          color: var(--pink-soft);
+          font-family: var(--font-display);
+          font-style: italic;
+          font-size: 16px;
+          text-align: center;
+        }
+        .img-modal-fig figcaption span {
+          color: var(--gold);
+          font-family: var(--font-mono);
+          font-size: 11px;
+          letter-spacing: 0.06em;
+          margin-left: 10px;
+        }
+        .img-modal-close,
+        .img-modal-nav {
+          position: absolute;
+          appearance: none;
+          background: rgba(255,255,255,0.10);
+          color: #fff;
+          border: 1px solid rgba(255,255,255,0.18);
+          border-radius: 50%;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          line-height: 1;
+          transition: background var(--d-2) var(--ease-out), transform var(--d-2) var(--ease-squish);
+        }
+        .img-modal-close {
+          top: 24px;
+          right: 24px;
+          width: 44px;
+          height: 44px;
+          font-size: 18px;
+        }
+        .img-modal-nav {
+          top: 50%;
+          transform: translateY(-50%);
+          width: 48px;
+          height: 48px;
+          font-size: 28px;
+          padding-bottom: 4px;
+        }
+        .img-modal-nav.prev { left: 24px; }
+        .img-modal-nav.next { right: 24px; }
+        .img-modal-close:hover { background: rgba(255,255,255,0.22); transform: scale(1.06); }
+        .img-modal-nav:hover   { background: rgba(255,255,255,0.22); transform: translateY(-50%) scale(1.08); }
+        @media (max-width: 640px) {
+          .img-modal-close { top: 12px; right: 12px; width: 38px; height: 38px; font-size: 16px; }
+          .img-modal-nav   { width: 40px; height: 40px; font-size: 22px; }
+          .img-modal-nav.prev { left: 8px; }
+          .img-modal-nav.next { right: 8px; }
         }
         .g-frame {
           position: relative;
@@ -508,8 +962,11 @@ function Gallery({ nsfw }) {
 /* ─────────────────────────────────────────────────────────────
    PRICES
    ───────────────────────────────────────────────────────────── */
-function PriceCard({ tier, idx, shimmer }) {
+function PriceCard({ tier, idx, shimmer, display, price }) {
   const ref = useRef(null);
+  const name = display?.name ?? tier.name;
+  const blurb = display?.blurb ?? tier.blurb;
+  const bullets = display?.bullets ?? tier.bullets;
   const tones = {
     neutral: { bar: "var(--charcoal)", chip: { bg: "rgba(62,63,65,0.06)", color: "var(--charcoal)" } },
     purple: { bar: "var(--purple)", chip: { bg: "var(--purple-tint)", color: "var(--purple)" } },
@@ -540,18 +997,17 @@ function PriceCard({ tier, idx, shimmer }) {
       <div style={{ position: "absolute", inset: "0 0 auto 0", height: 4, background: tones.bar }} />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-        <Badge tone={tier.tone}>{tier.name}</Badge>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--gray)" }}>·{idx + 1}/3</span>
+        <Badge tone={tier.tone}>{name}</Badge>
       </div>
 
       <h3 style={{
         fontFamily: "var(--font-display)", fontWeight: 500,
         fontSize: 28, letterSpacing: "-0.02em", margin: "12px 0 8px",
         color: "var(--charcoal)",
-      }}>{tier.name}</h3>
+      }}>{name}</h3>
 
       <p style={{ fontSize: 14.5, color: "var(--gray)", margin: "0 0 22px", lineHeight: 1.55 }}>
-        {tier.blurb}
+        {blurb}
       </p>
 
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 22, position: "relative" }}>
@@ -560,7 +1016,7 @@ function PriceCard({ tier, idx, shimmer }) {
           letterSpacing: "-0.03em", color: "var(--charcoal)", lineHeight: 1,
         }}>
           <span style={{ fontSize: 22, color: "var(--gray)", marginRight: 4 }}>{tier.currency}</span>
-          {tier.price}
+          {price ?? tier.price}
         </span>
         <span style={{ fontSize: 13, color: "var(--gray)", marginLeft: 6 }}>· {tier.delivery}</span>
         {/* gold shimmer overlay */}
@@ -573,7 +1029,7 @@ function PriceCard({ tier, idx, shimmer }) {
       </div>
 
       <ul style={{ listStyle: "none", padding: 0, margin: "0 0 24px", display: "grid", gap: 10 }}>
-        {tier.bullets.map((b) => (
+        {bullets.map((b) => (
           <li key={b} style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14.5 }}>
             <span style={{
               flexShrink: 0, width: 18, height: 18, borderRadius: 999,
@@ -588,14 +1044,14 @@ function PriceCard({ tier, idx, shimmer }) {
   );
 }
 
-function Prices({ tweaks }) {
+function Prices({ tweaks, t }) {
   return (
     <section id="prices" style={{ padding: "var(--s-9) 0", background: "var(--bg)" }}>
       <div className="container">
         <SectionHeader
-          kicker="Pricing"
-          title="Comission Prices"
-          sub="Prices in BRL (Brazil) or USD (International). The numerical value remains the same for both currencies."
+          kicker={t.prices.kicker}
+          title={t.prices.title}
+          sub={t.prices.sub}
           align="center"
         />
 
@@ -605,7 +1061,20 @@ function Prices({ tweaks }) {
           gap: "var(--s-5)",
           alignItems: "stretch",
         }} className="price-grid">
-          {TIERS.map((t, i) => <PriceCard key={t.id} tier={t} idx={i} shimmer={tweaks.shimmerOnHover} />)}
+          {TIERS.map((tier, i) => (
+            <PriceCard
+              key={tier.id}
+              tier={tier}
+              idx={i}
+              shimmer={tweaks.shimmerOnHover}
+              display={t.prices.tiers[tier.id]}
+              price={
+                tier.id === "icon" ? tweaks.iconPrice
+                  : tier.id === "halfbody" ? tweaks.halfbodyPrice
+                  : tweaks.fullbodyPrice
+              }
+            />
+          ))}
         </div>
       </div>
 
@@ -621,11 +1090,11 @@ function Prices({ tweaks }) {
 /* ─────────────────────────────────────────────────────────────
    SOCIALS
    ───────────────────────────────────────────────────────────── */
-function Socials() {
+function Socials({ t }) {
   return (
     <section id="socials" style={{ padding: "var(--s-9) 0", background: "var(--cream)" }}>
       <div className="container">
-        <SectionHeader kicker="Socials" title="Where to find me" sub="The home of my WIPs and funny art + a lot of 🦉 things." align="center" />
+        <SectionHeader kicker={t.socials.kicker} title={t.socials.title} sub={t.socials.sub} align="center" />
         <div style={{
           display: "grid",
           gridTemplateColumns: "repeat(2, 1fr)",
@@ -678,10 +1147,239 @@ function Socials() {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   FOOTER — minimal closing slab. Hosts a discreet "admin" entry
+   that fires the same postMessage the host edit-toolbar does, so
+   the panel can be opened from inside the page itself.
+   Designed to fade into the background: muted text, low contrast,
+   gently lifts on hover. Should not pull a regular visitor's eye.
+   ───────────────────────────────────────────────────────────── */
+function Footer() {
+  const openAdmin = () => {
+    window.postMessage({ type: "__activate_edit_mode" }, "*");
+  };
+  const year = new Date().getFullYear();
+  return (
+    <footer style={{
+      padding: "var(--s-6) 0 var(--s-7)",
+      background: "var(--cream)",
+      borderTop: "1px solid var(--nav-border)",
+      transition: "background-color var(--d-3) var(--ease-out), border-color var(--d-3) var(--ease-out)",
+    }}>
+      <div className="container" style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 6,
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        letterSpacing: "0.04em",
+        color: "var(--text-muted)",
+      }}>
+        <span style={{ opacity: 0.65 }}>© {year} RuzOwl</span>
+        <button
+          type="button"
+          onClick={openAdmin}
+          aria-label="Open admin panel"
+          style={{
+            appearance: "none",
+            border: 0,
+            background: "transparent",
+            font: "inherit",
+            color: "var(--text-muted)",
+            opacity: 0.42,
+            cursor: "pointer",
+            padding: "4px 10px",
+            borderRadius: "var(--r-pill)",
+            textTransform: "lowercase",
+            letterSpacing: "0.10em",
+            transition: "opacity var(--d-2) var(--ease-out), color var(--d-2) var(--ease-out), background var(--d-2) var(--ease-out)",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.opacity = "1";
+            e.currentTarget.style.color = "var(--purple)";
+            e.currentTarget.style.background = "var(--purple-tint)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.opacity = "0.42";
+            e.currentTarget.style.color = "var(--text-muted)";
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          admin
+        </button>
+      </div>
+    </footer>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   PUBLISH TO GITHUB — pushes the commission subset of tweaks to
+   data/commissions.json via the GitHub Contents API. PAT lives
+   in the admin's localStorage only; visitors only ever fetch the
+   resulting public JSON.
+   ───────────────────────────────────────────────────────────── */
+function PublishToGitHub({ tweaks, t }) {
+  const [pat, setPat] = useState(() => {
+    try { return localStorage.getItem(PAT_STORAGE_KEY) || ""; } catch { return ""; }
+  });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null); // { kind: "ok" | "err" | "info", text }
+
+  const savePat = (v) => {
+    setPat(v);
+    try {
+      if (v) localStorage.setItem(PAT_STORAGE_KEY, v);
+      else localStorage.removeItem(PAT_STORAGE_KEY);
+    } catch {}
+  };
+
+  const publish = async () => {
+    if (!pat) { setMsg({ kind: "err", text: t.admin.publishNoToken }); return; }
+    setBusy(true);
+    setMsg({ kind: "info", text: t.admin.publishBusy });
+    const payload = {};
+    PUBLISHED_KEYS.forEach((k) => { if (k in tweaks) payload[k] = tweaks[k]; });
+    try {
+      await publishToGitHub(payload, pat);
+      setMsg({ kind: "ok", text: t.admin.publishOk });
+    } catch (e) {
+      let errText = e.message;
+      if (e.message.includes("403")) {
+        errText = "Token doesn't have write permission. Use a classic PAT with 'repo' scope, or grant 'Contents: Read and write' on a fine-grained PAT.";
+      }
+      setMsg({ kind: "err", text: `${t.admin.publishErr}: ${errText}` });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const msgColor = msg?.kind === "ok"
+    ? "#3f8a26"
+    : msg?.kind === "err"
+      ? "#c4254a"
+      : "rgba(41,38,27,0.6)";
+
+  return (
+    <>
+      <TweakSection label={t.admin.sectionPublish} />
+      <TweakRow label={t.admin.labelPat}>
+        <input
+          className="twk-field"
+          type="password"
+          value={pat}
+          placeholder="github_pat_…"
+          onChange={(e) => savePat(e.target.value)}
+        />
+      </TweakRow>
+      <TweakButton
+        label={busy ? t.admin.publishBusy : t.admin.publishBtn}
+        onClick={publish}
+      />
+      <div style={{ fontSize: 10, color: "rgba(41,38,27,0.5)", lineHeight: 1.4, marginTop: -2 }}>
+        {t.admin.publishHint}
+      </div>
+      {msg && (
+        <div style={{ fontSize: 11, color: msgColor, lineHeight: 1.4, marginTop: -4, wordBreak: "break-word" }}>
+          {msg.text}
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ADMIN LOGIN — gates TweaksPanel content. Hardcoded password,
+   no backend; this is just a casual-visitor barrier. Auth state
+   persists in localStorage so refresh doesn't kick the admin out.
+   Styled with the existing `.twk-*` classes so it lives inside
+   the panel without visual seams.
+   ───────────────────────────────────────────────────────────── */
+function AdminLogin({ onLogin, t }) {
+  const [pw, setPw] = useState("");
+  const [error, setError] = useState(false);
+  const submit = (e) => {
+    e.preventDefault();
+    if (pw === ADMIN_PASSWORD) {
+      onLogin();
+    } else {
+      setError(true);
+      setPw("");
+    }
+  };
+  return (
+    <>
+      <div className="twk-sect">{t.admin.sectionLogin}</div>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <input
+          className="twk-field"
+          type="password"
+          value={pw}
+          placeholder={t.admin.placeholder}
+          autoFocus
+          onChange={(e) => { setPw(e.target.value); setError(false); }}
+        />
+        {error && (
+          <div style={{ fontSize: 11, color: "#c4254a", fontWeight: 500 }}>
+            {t.admin.errorMsg}
+          </div>
+        )}
+        <button type="submit" className="twk-btn">{t.admin.loginBtn}</button>
+      </form>
+    </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
    APP
    ───────────────────────────────────────────────────────────── */
 function App() {
   const [tweaks, setTweak] = useTweaks(window.TWEAK_DEFAULTS);
+  // Visitor-facing language preference — kept out of the tweaks system because
+  // tweaks are admin-controlled and persisted on disk; language is per-visitor.
+  const [lang, setLang] = useState(() => {
+    try { return localStorage.getItem(LANG_STORAGE_KEY) || "en"; }
+    catch { return "en"; }
+  });
+  // Admin auth — also localStorage; intentionally not in tweaks.
+  const [authed, setAuthed] = useState(() => {
+    try { return localStorage.getItem(AUTH_STORAGE_KEY) === "1"; }
+    catch {
+      try { return sessionStorage.getItem(AUTH_STORAGE_KEY) === "1"; }
+      catch { return false; }
+    }
+  });
+
+  const t = TEXT[lang] || TEXT.en;
+
+  // Load remote commissions from GitHub on first mount, merge into tweaks.
+  // This ensures all visitors see the latest published state.
+  useEffect(() => {
+    loadRemoteCommissions().then((data) => {
+      if (data) {
+        Object.entries(data).forEach(([key, val]) => {
+          if (key in tweaks) setTweak(key, val);
+        });
+      }
+    }).catch(() => {
+      // Network errors are silent; site works offline + with stale cache.
+    });
+  }, []);
+
+  const setLanguage = (l) => {
+    setLang(l);
+    try { localStorage.setItem(LANG_STORAGE_KEY, l); } catch {}
+  };
+  const doLogin = () => {
+    setAuthed(true);
+    try { localStorage.setItem(AUTH_STORAGE_KEY, "1"); } catch {}
+    try { sessionStorage.setItem(AUTH_STORAGE_KEY, "1"); } catch {}
+  };
+  const doLogout = () => {
+    setAuthed(false);
+    try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch {}
+    try { sessionStorage.removeItem(AUTH_STORAGE_KEY); } catch {}
+  };
+
   useReveal();
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", tweaks.dark ? "dark" : "light");
@@ -689,56 +1387,128 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute("data-mode", tweaks.nsfw ? "nsfw" : "sfw");
   }, [tweaks.nsfw]);
+  useEffect(() => {
+    document.documentElement.setAttribute("lang", lang === "pt" ? "pt-BR" : "en");
+  }, [lang]);
 
   return (
     <>
       <Nav
         status={tweaks.status}
+        slotsCurrent={tweaks.slotsCurrent}
+        slotsMax={tweaks.slotsMax}
         dark={tweaks.dark}
         onToggleDark={() => setTweak("dark", !tweaks.dark)}
         nsfw={tweaks.nsfw}
         onToggleNsfw={() => setTweak("nsfw", !tweaks.nsfw)}
+        lang={lang}
+        onToggleLang={() => setLanguage(lang === "en" ? "pt" : "en")}
+        t={t}
       />
-      <Hero tweaks={tweaks} />
-      <Gallery nsfw={tweaks.nsfw} />
-      <Prices tweaks={tweaks} />
-      <Socials />
+      <Hero tweaks={tweaks} t={t} />
+      <Gallery nsfw={tweaks.nsfw} t={t} />
+      <Prices tweaks={tweaks} t={t} />
+      <Socials t={t} />
+      <Footer />
 
       <TweaksPanel>
-        <TweakSection label="Brand" />
-        <TweakRadio
-          label="Status pill"
-          value={tweaks.status}
-          options={["open", "limited", "closed"]}
-          onChange={(v) => setTweak("status", v)}
-        />
-        <TweakSection label="Personality" />
-        <TweakToggle
-          label="Floating sparkles around avatar"
-          value={tweaks.showSparkles}
-          onChange={(v) => setTweak("showSparkles", v)}
-        />
-        <TweakToggle
-          label="Gold shimmer on price hover"
-          value={tweaks.shimmerOnHover}
-          onChange={(v) => setTweak("shimmerOnHover", v)}
-        />
-        <TweakToggle
-          label="Tilt avatar card"
-          value={tweaks.tilt}
-          onChange={(v) => setTweak("tilt", v)}
-        />
-        <TweakSection label="Theme" />
-        <TweakToggle
-          label="Dark mode"
-          value={tweaks.dark}
-          onChange={(v) => setTweak("dark", v)}
-        />
-        <TweakToggle
-          label="NSFW mode"
-          value={tweaks.nsfw}
-          onChange={(v) => setTweak("nsfw", v)}
-        />
+        {authed ? (
+          <>
+            <TweakSection label={t.admin.sectionCommissions} />
+            <TweakRadio
+              label={t.admin.labelStatus}
+              value={tweaks.status}
+              options={[
+                { value: "open", label: t.status.open },
+                { value: "limited", label: t.status.limited },
+                { value: "ych", label: t.status.ych },
+                { value: "closed", label: t.status.closed },
+              ]}
+              onChange={(v) => setTweak("status", v)}
+            />
+            {(tweaks.status === "limited" || tweaks.status === "ych") && (
+              <>
+                <TweakNumber
+                  label={t.admin.labelSlotsCur}
+                  value={tweaks.slotsCurrent}
+                  min={0}
+                  max={99}
+                  onChange={(v) => setTweak("slotsCurrent", v)}
+                />
+                <TweakNumber
+                  label={t.admin.labelSlotsMax}
+                  value={tweaks.slotsMax}
+                  min={1}
+                  max={99}
+                  onChange={(v) => setTweak("slotsMax", v)}
+                />
+              </>
+            )}
+
+            <TweakSection label={t.admin.sectionPrices} />
+            <TweakNumber
+              label={t.admin.labelIconPrice}
+              value={tweaks.iconPrice}
+              min={1}
+              max={9999}
+              unit=" BRL"
+              onChange={(v) => setTweak("iconPrice", v)}
+            />
+            <TweakNumber
+              label={t.admin.labelHalfbodyPrice}
+              value={tweaks.halfbodyPrice}
+              min={1}
+              max={9999}
+              unit=" BRL"
+              onChange={(v) => setTweak("halfbodyPrice", v)}
+            />
+            <TweakNumber
+              label={t.admin.labelFullbodyPrice}
+              value={tweaks.fullbodyPrice}
+              min={1}
+              max={9999}
+              unit=" BRL"
+              onChange={(v) => setTweak("fullbodyPrice", v)}
+            />
+
+            <PublishToGitHub tweaks={tweaks} t={t} />
+
+            <TweakSection label="Personality" />
+            <TweakToggle
+              label="Floating sparkles around avatar"
+              value={tweaks.showSparkles}
+              onChange={(v) => setTweak("showSparkles", v)}
+            />
+            <TweakToggle
+              label="Gold shimmer on price hover"
+              value={tweaks.shimmerOnHover}
+              onChange={(v) => setTweak("shimmerOnHover", v)}
+            />
+            <TweakToggle
+              label="Tilt avatar card"
+              value={tweaks.tilt}
+              onChange={(v) => setTweak("tilt", v)}
+            />
+
+            <TweakSection label="Theme" />
+            <TweakToggle
+              label="Dark mode"
+              value={tweaks.dark}
+              onChange={(v) => setTweak("dark", v)}
+            />
+            <TweakToggle
+              label="NSFW mode"
+              value={tweaks.nsfw}
+              onChange={(v) => setTweak("nsfw", v)}
+            />
+
+            <div style={{ marginTop: 6, paddingTop: 10, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+              <TweakButton label={t.admin.logoutBtn} secondary onClick={doLogout} />
+            </div>
+          </>
+        ) : (
+          <AdminLogin onLogin={doLogin} t={t} />
+        )}
       </TweaksPanel>
     </>
   );

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RuzOwl — Commissions & Portfolio</title>
+  <title>RuzOwl Portfolio 🦉</title>
   <link rel="icon" type="image/png" href="assets/ruz.png" />
 
   <!-- Fonts: Fraunces (display, soft serif) + Inter (body) -->
@@ -39,6 +39,26 @@
       --gold: #f0bf59;
       --gold-deep: #d4a23d;
       --gold-tint: #faecc9;
+      --status-open-dot: #7aa05c;
+      --status-open-bg: rgba(122, 160, 92, 0.12);
+      --status-open-color: #3f5a26;
+      --status-open-border: rgba(122, 160, 92, 0.20);
+      --status-open-glow: none;
+      --status-limited-dot: #d4a23d;
+      --status-limited-bg: var(--gold-tint);
+      --status-limited-color: #6b4d12;
+      --status-limited-border: rgba(212, 162, 61, 0.22);
+      --status-limited-glow: none;
+      --status-ych-dot: #4a78d1;
+      --status-ych-bg: rgba(74, 120, 209, 0.12);
+      --status-ych-color: #2c4f9a;
+      --status-ych-border: rgba(74, 120, 209, 0.18);
+      --status-ych-glow: none;
+      --status-closed-dot: #b62f43;
+      --status-closed-bg: rgba(182, 47, 67, 0.14);
+      --status-closed-color: #7f1f30;
+      --status-closed-border: rgba(182, 47, 67, 0.22);
+      --status-closed-glow: none;
 
       --bg: var(--pink);
       --surface: #ffffff;
@@ -91,6 +111,10 @@
       /* Nav backdrop — translucent so backdrop-filter blur reads */
       --nav-bg: rgba(238, 221, 223, 0.82);
       --nav-border: rgba(62, 63, 65, 0.06);
+
+      /* Hero decorative blob — themed per mode for cohesive transitions */
+      --hero-blob: radial-gradient(60% 60% at 30% 40%, rgba(143,43,163,0.10) 0%, rgba(143,43,163,0) 60%),
+                   radial-gradient(50% 60% at 80% 30%, rgba(240,191,89,0.18) 0%, rgba(240,191,89,0) 60%);
     }
 
     /* Dark mode — re-roles the palette: charcoal becomes the surface, pink becomes the muted ink, purple/gold stay as accents but glow against the dark ground */
@@ -110,6 +134,26 @@
       --gold: #f5cd72;
       --gold-deep: #e9b346;
       --gold-tint: #3a2c10;
+      --status-open-dot: #b4d588;
+      --status-open-bg: rgba(180, 213, 136, 0.14);
+      --status-open-color: #e8ffcc;
+      --status-open-border: rgba(180, 213, 136, 0.30);
+      --status-open-glow: 0 0 0 1px rgba(180, 213, 136, 0.30), 0 0 22px rgba(180, 213, 136, 0.28);
+      --status-limited-dot: #f5cd72;
+      --status-limited-bg: rgba(245, 205, 114, 0.14);
+      --status-limited-color: #fff1c8;
+      --status-limited-border: rgba(245, 205, 114, 0.30);
+      --status-limited-glow: 0 0 0 1px rgba(245, 205, 114, 0.30), 0 0 22px rgba(245, 205, 114, 0.28);
+      --status-ych-dot: #88adff;
+      --status-ych-bg: rgba(136, 173, 255, 0.16);
+      --status-ych-color: #dce7ff;
+      --status-ych-border: rgba(136, 173, 255, 0.30);
+      --status-ych-glow: 0 0 0 1px rgba(136, 173, 255, 0.28), 0 0 20px rgba(136, 173, 255, 0.22);
+      --status-closed-dot: #ff7f99;
+      --status-closed-bg: rgba(255, 127, 153, 0.18);
+      --status-closed-color: #ffd6df;
+      --status-closed-border: rgba(255, 127, 153, 0.30);
+      --status-closed-glow: 0 0 0 1px rgba(255, 127, 153, 0.28), 0 0 20px rgba(255, 127, 153, 0.22);
 
       --bg: var(--pink);
       --surface: #2a2026;
@@ -125,22 +169,115 @@
 
       --nav-bg: rgba(26, 20, 24, 0.78);
       --nav-border: rgba(244, 231, 233, 0.08);
+
+      --hero-blob: radial-gradient(60% 60% at 30% 40%, rgba(199,104,214,0.16) 0%, rgba(199,104,214,0) 60%),
+                   radial-gradient(50% 60% at 80% 30%, rgba(245,205,114,0.16) 0%, rgba(245,205,114,0) 60%);
     }
 
-    /* NSFW Mode Feedback — subtle shift in accent colors for feedback */
+    /* ─────────────────────────────────────────────────────────────
+       NSFW MODE — crimson rose theme, pulled from the hero ear
+       Same brand, different mood. Crimson replaces purple as the
+       primary accent; gold shifts to warm rose-gold for harmony;
+       surfaces warm into a soft blush. Designed to read as a
+       deliberate, sensual reskin rather than a saturation hack.
+       ───────────────────────────────────────────────────────────── */
     html[data-mode="nsfw"] {
-      --purple: #c026d3; /* more vibrant magenta */
-      --purple-soft: #e879f9;
-      --gold: #f472b6;   /* shifts towards pink/rose */
-      --gold-deep: #db2777;
+      /* Surfaces — warm rose family */
+      --pink: #f0d4d8;          /* page bg — soft rose-blush */
+      --pink-soft: #fce0e4;     /* lifted cards */
+      --pink-deep: #e8b8c0;
+      --cream: #f8e0e2;         /* alt section bg */
+
+      /* Text — wine-charcoal so it reads against rose surfaces */
+      --charcoal: #3d2429;
+      --charcoal-soft: #4d3338;
+      --ink: #2a181c;
+      --gray: #8a6d72;
+      --gray-light: #b8a4a8;
+
+      /* Surface — rose-tinted white (cards subtly lift toward the theme) */
+      --surface: #fff8f9;
+
+      /* Crimson replaces purple as the primary accent */
+      --purple: #a8324a;        /* deep crimson — the hero's ear */
+      --purple-soft: #c95877;
+      --purple-tint: #fbdce2;
+
+      /* Gold becomes warm rose-gold — harmonic with crimson */
+      --gold: #d97a85;
+      --gold-deep: #b04a5a;
+      --gold-tint: #f9d6dc;
+      --status-ych-dot: #5f89e8;
+      --status-ych-bg: rgba(95, 137, 232, 0.14);
+      --status-ych-color: #2f4f9d;
+      --status-ych-border: rgba(95, 137, 232, 0.18);
+      --status-closed-dot: #b52d48;
+      --status-closed-bg: rgba(181, 45, 72, 0.14);
+      --status-closed-color: #7a2234;
+      --status-closed-border: rgba(181, 45, 72, 0.22);
+
+      /* Shadows pick up the crimson tint so glows match the accent */
+      --shadow-sm: 0 1px 2px rgba(62, 30, 35, 0.07), 0 2px 6px rgba(168, 50, 74, 0.06);
+      --shadow-md: 0 4px 12px rgba(62, 30, 35, 0.07), 0 8px 24px rgba(168, 50, 74, 0.10);
+      --shadow-lg: 0 12px 32px rgba(62, 30, 35, 0.10), 0 24px 60px rgba(168, 50, 74, 0.12);
+      --shadow-glow-gold: 0 0 0 1px rgba(217, 122, 133, 0.4), 0 8px 24px rgba(217, 122, 133, 0.28);
+      --shadow-glow-purple: 0 0 0 1px rgba(168, 50, 74, 0.4), 0 8px 28px rgba(168, 50, 74, 0.30);
+
+      --nav-bg: rgba(240, 212, 216, 0.84);
+      --nav-border: rgba(62, 30, 35, 0.08);
+
+      --hero-blob: radial-gradient(60% 60% at 30% 40%, rgba(168,50,74,0.13) 0%, rgba(168,50,74,0) 60%),
+                   radial-gradient(50% 60% at 80% 30%, rgba(217,122,133,0.20) 0%, rgba(217,122,133,0) 60%);
     }
+
+    /* Dark + NSFW — deep wine page on which crimson glows like neon */
     html[data-theme="dark"][data-mode="nsfw"] {
-      --purple: #e879f9;
-      --gold: #fb7185;
+      --pink: #1f1216;          /* deep wine-black */
+      --pink-soft: #2d1a1f;     /* lifted card */
+      --pink-deep: #3a232a;
+      --cream: #261519;
+
+      --charcoal: #f5d8dc;      /* warm cream-rose ink */
+      --charcoal-soft: #ecc8cc;
+      --ink: #ffffff;
+      --gray: #b8959c;
+      --gray-light: #6b4d54;
+
+      --surface: #2a181d;
+
+      --purple: #e87490;        /* lifted crimson-rose, pops on dark */
+      --purple-soft: #f09cad;
+      --purple-tint: #3a1f25;
+
+      --gold: #f0a08c;          /* warm peach-coral */
+      --gold-deep: #d97a6a;
+      --gold-tint: #3a2218;
+      --status-ych-dot: #84b2ff;
+      --status-ych-bg: rgba(132, 178, 255, 0.18);
+      --status-ych-color: #e7f0ff;
+      --status-ych-border: rgba(132, 178, 255, 0.22);
+      --status-closed-dot: #ff6f88;
+      --status-closed-bg: rgba(255, 111, 136, 0.18);
+      --status-closed-color: #ffd6de;
+      --status-closed-border: rgba(255, 111, 136, 0.22);
+
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.45), 0 2px 6px rgba(232,116,144,0.10);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.50), 0 8px 24px rgba(232,116,144,0.14);
+      --shadow-lg: 0 12px 32px rgba(0,0,0,0.55), 0 24px 60px rgba(232,116,144,0.18);
+      --shadow-glow-gold: 0 0 0 1px rgba(240, 160, 140, 0.4), 0 8px 24px rgba(240, 160, 140, 0.32);
+      --shadow-glow-purple: 0 0 0 1px rgba(232, 116, 144, 0.45), 0 8px 28px rgba(232, 116, 144, 0.34);
+
+      --nav-bg: rgba(31, 18, 22, 0.82);
+      --nav-border: rgba(245, 216, 220, 0.10);
+
+      --hero-blob: radial-gradient(60% 60% at 30% 40%, rgba(232,116,144,0.16) 0%, rgba(232,116,144,0) 60%),
+                   radial-gradient(50% 60% at 80% 30%, rgba(240,160,140,0.18) 0%, rgba(240,160,140,0) 60%);
     }
 
     html { transition: background-color var(--d-3) var(--ease-out); }
     body { transition: background-color var(--d-3) var(--ease-out), color var(--d-3) var(--ease-out); }
+    /* Sections inherit theme transitions so the whole page sweeps together */
+    section { transition: background-color var(--d-3) var(--ease-out); }
 
     *, *::before, *::after { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
@@ -207,6 +344,26 @@
       0%, 100% { box-shadow: 0 0 0 0 rgba(143, 163, 92, 0.4); }
       50%      { box-shadow: 0 0 0 6px rgba(143, 163, 92, 0); }
     }
+    /* NSFW toggle confirmation — squish + radial ripple from button */
+    @keyframes nsfw-pulse {
+      0%   { transform: scale(1); }
+      35%  { transform: scale(1.08); }
+      100% { transform: scale(1); }
+    }
+    @keyframes nsfw-ripple {
+      0%   { transform: scale(0.65); opacity: 0.55; }
+      100% { transform: scale(2.4);  opacity: 0; }
+    }
+    .nav-nsfw-toggle.is-pulsing { animation: nsfw-pulse 600ms var(--ease-squish); }
+    .nsfw-ripple {
+      position: absolute;
+      inset: -2px;
+      border-radius: var(--r-pill);
+      background: radial-gradient(closest-side, var(--purple) 0%, transparent 65%);
+      pointer-events: none;
+      animation: nsfw-ripple 700ms var(--ease-out) forwards;
+      z-index: 0;
+    }
   </style>
 
   <!-- React + Babel (pinned, with integrity) -->
@@ -222,6 +379,11 @@
   <script>
     window.TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
       "status": "open",
+      "slotsCurrent": 2,
+      "slotsMax": 5,
+      "iconPrice": 45,
+      "halfbodyPrice": 50,
+      "fullbodyPrice": 70,
       "displayName": "RuzOwl",
       "tagline": "Cozy, character-first illustration & furry commissions.",
       "currency": "BRL",

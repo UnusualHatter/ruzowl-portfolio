@@ -125,6 +125,11 @@ const __TWEAKS_STYLE = `
   .twk-btn.secondary{background:rgba(0,0,0,.06);color:inherit}
   .twk-btn.secondary:hover{background:rgba(0,0,0,.1)}
 
+  .twk-launch{position:fixed;right:16px;bottom:16px;z-index:2147483646;appearance:none;
+    border:0;padding:10px 14px;border-radius:999px;background:rgba(0,0,0,.82);color:#fff;
+    font:inherit;font-weight:600;box-shadow:0 12px 40px rgba(0,0,0,.18);cursor:default}
+  .twk-launch:hover{background:rgba(0,0,0,.9)}
+
   .twk-swatch{appearance:none;-webkit-appearance:none;width:56px;height:22px;
     border:.5px solid rgba(0,0,0,.1);border-radius:6px;padding:0;cursor:default;
     background:transparent;flex-shrink:0}
@@ -162,6 +167,7 @@ function TweaksPanel({ title = 'Tweaks', children }) {
   const dragRef = React.useRef(null);
   const offsetRef = React.useRef({ x: 16, y: 16 });
   const PAD = 16;
+  const openPanel = () => setOpen(true);
 
   const clampToViewport = React.useCallback(() => {
     const panel = dragRef.current;
@@ -227,20 +233,25 @@ function TweaksPanel({ title = 'Tweaks', children }) {
     window.addEventListener('mouseup', up);
   };
 
-  if (!open) return null;
   return (
     <>
       <style>{__TWEAKS_STYLE}</style>
-      <div ref={dragRef} className="twk-panel" data-noncommentable=""
-           style={{ right: offsetRef.current.x, bottom: offsetRef.current.y }}>
-        <div className="twk-hd" onMouseDown={onDragStart}>
-          <b>{title}</b>
-          <button className="twk-x" aria-label="Close tweaks"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={dismiss}>✕</button>
+      {open ? (
+        <div ref={dragRef} className="twk-panel" data-noncommentable=""
+             style={{ right: offsetRef.current.x, bottom: offsetRef.current.y }}>
+          <div className="twk-hd" onMouseDown={onDragStart}>
+            <b>{title}</b>
+            <button className="twk-x" aria-label="Close tweaks"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={dismiss}>✕</button>
+          </div>
+          <div className="twk-body">{children}</div>
         </div>
-        <div className="twk-body">{children}</div>
-      </div>
+      ) : (
+        <button type="button" className="twk-launch" onClick={openPanel}>
+          Admin
+        </button>
+      )}
     </>
   );
 }
