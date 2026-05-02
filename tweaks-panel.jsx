@@ -1,47 +1,6 @@
 
-// tweaks-panel.jsx
-// Reusable Tweaks shell + form-control helpers.
-//
-// Owns the host protocol (listens for __activate_edit_mode / __deactivate_edit_mode,
-// posts __edit_mode_available / __edit_mode_set_keys / __edit_mode_dismissed) so
-// individual prototypes don't re-roll it. Ships a consistent set of controls so you
-// don't hand-draw <input type="range">, segmented radios, steppers, etc.
-//
-// Usage (in an HTML file that loads React + Babel):
-//
-//   const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
-//     "primaryColor": "#D97757",
-//     "fontSize": 16,
-//     "density": "regular",
-//     "dark": false
-//   }/*EDITMODE-END*/;
-//
-//   function App() {
-//     const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
-//     return (
-//       <div style={{ fontSize: t.fontSize, color: t.primaryColor }}>
-//         Hello
-//         <TweaksPanel>
-//           <TweakSection label="Typography" />
-//           <TweakSlider label="Font size" value={t.fontSize} min={10} max={32} unit="px"
-//                        onChange={(v) => setTweak('fontSize', v)} />
-//           <TweakRadio  label="Density" value={t.density}
-//                        options={['compact', 'regular', 'comfy']}
-//                        onChange={(v) => setTweak('density', v)} />
-//           <TweakSection label="Theme" />
-//           <TweakColor  label="Primary" value={t.primaryColor}
-//                        onChange={(v) => setTweak('primaryColor', v)} />
-//           <TweakToggle label="Dark mode" value={t.dark}
-//                        onChange={(v) => setTweak('dark', v)} />
-//         </TweaksPanel>
-//       </div>
-//     );
-//   }
-//
-// ─────────────────────────────────────────────────────────────────────────────
-
 const __TWEAKS_STYLE = `
-  .twk-panel{position:fixed;right:16px;bottom:16px;z-index:2147483646;width:280px;
+  .twk-panel{position:fixed;right:16px;bottom:16px;z-index:2147483646;width:min(360px,calc(100vw - 32px));
     max-height:calc(100vh - 32px);display:flex;flex-direction:column;
     background:rgba(250,249,247,.78);color:#29261b;
     -webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%);
@@ -98,8 +57,8 @@ const __TWEAKS_STYLE = `
   .twk-seg.dragging .twk-seg-thumb{transition:none}
   .twk-seg button{appearance:none;position:relative;z-index:1;flex:1;border:0;
     background:transparent;color:inherit;font:inherit;font-weight:500;min-height:22px;
-    border-radius:6px;cursor:default;padding:4px 6px;line-height:1.2;
-    overflow-wrap:anywhere}
+    border-radius:6px;cursor:default;padding:4px 6px;line-height:1.15;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
   .twk-toggle{position:relative;width:32px;height:18px;border:0;border-radius:999px;
     background:rgba(0,0,0,.15);transition:background .15s;cursor:default;padding:0}
@@ -137,15 +96,9 @@ const __TWEAKS_STYLE = `
   .twk-swatch::-webkit-color-swatch{border:0;border-radius:5.5px}
   .twk-swatch::-moz-color-swatch{border:0;border-radius:5.5px}
 `;
-
-// ── useTweaks ───────────────────────────────────────────────────────────────
-// Single source of truth for tweak values. setTweak persists via the host
-// (__edit_mode_set_keys → host rewrites the EDITMODE block on disk).
 function useTweaks(defaults) {
   const [values, setValues] = React.useState(defaults);
-  // Accepts either setTweak('key', value) or setTweak({ key: value, ... }) so a
-  // useState-style call doesn't write a "[object Object]" key into the persisted
-  // JSON block.
+  // Accept both single-key updates and object patches.
   const setTweak = React.useCallback((keyOrEdits, val) => {
     const edits = typeof keyOrEdits === 'object' && keyOrEdits !== null
       ? keyOrEdits : { [keyOrEdits]: val };
@@ -154,14 +107,6 @@ function useTweaks(defaults) {
   }, []);
   return [values, setTweak];
 }
-
-// ── TweaksPanel ─────────────────────────────────────────────────────────────
-// Floating shell. Registers the protocol listener BEFORE announcing
-// availability — if the announce ran first, the host's activate could land
-// before our handler exists and the toolbar toggle would silently no-op.
-// The close button posts __edit_mode_dismissed so the host's toolbar toggle
-// flips off in lockstep; the host echoes __deactivate_edit_mode back which
-// is what actually hides the panel.
 function TweaksPanel({ title = 'Tweaks', children }) {
   const [open, setOpen] = React.useState(false);
   const dragRef = React.useRef(null);
@@ -206,11 +151,13 @@ function TweaksPanel({ title = 'Tweaks', children }) {
     return () => window.removeEventListener('message', onMsg);
   }, []);
 
+  // Closing the panel also notifies the host edit-mode protocol.
   const dismiss = () => {
     setOpen(false);
     window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*');
   };
 
+  // Dragging stays manual so the panel feels immediate and predictable.
   const onDragStart = (e) => {
     const panel = dragRef.current;
     if (!panel) return;
@@ -256,8 +203,6 @@ function TweaksPanel({ title = 'Tweaks', children }) {
   );
 }
 
-// ── Layout helpers ──────────────────────────────────────────────────────────
-
 function TweakSection({ label, children }) {
   return (
     <>
@@ -278,8 +223,6 @@ function TweakRow({ label, value, children, inline = false }) {
     </div>
   );
 }
-
-// ── Controls ────────────────────────────────────────────────────────────────
 
 function TweakSlider({ label, value, min = 0, max = 100, step = 1, unit = '', onChange }) {
   return (
@@ -307,9 +250,6 @@ function TweakRadio({ label, value, options, onChange }) {
   const opts = options.map((o) => (typeof o === 'object' ? o : { value: o, label: o }));
   const idx = Math.max(0, opts.findIndex((o) => o.value === value));
   const n = opts.length;
-
-  // The active value is read by pointer-move handlers attached for the lifetime
-  // of a drag — ref it so a stale closure doesn't fire onChange for every move.
   const valueRef = React.useRef(value);
   valueRef.current = value;
 

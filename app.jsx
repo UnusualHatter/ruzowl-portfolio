@@ -1,34 +1,17 @@
-// app.jsx — RuzOwl commission portfolio
-// Single-page flow: nav → hero → gallery → prices → socials
 
 const { useState, useEffect, useRef } = React;
 
-/* ─────────────────────────────────────────────────────────────
-   ADMIN AUTH — basic protection, hardcoded per spec.
-   Not a security boundary: the password is in the source. It only
-   gates the tweaks panel UI from casual visitors.
-   ───────────────────────────────────────────────────────────── */
+
 const ADMIN_PASSWORD = "corujinha";
 const AUTH_STORAGE_KEY = "ruzowl_admin_authed";
 const LANG_STORAGE_KEY = "ruzowl_lang";
 
-/* ─────────────────────────────────────────────────────────────
-   GLOBAL PUBLISH (GitHub Pages)
-   The site is hosted statically on GitHub Pages, so admin tweaks
-   need a way to reach all visitors. The pattern: a small JSON
-   file at /data/commissions.json acts as the source of truth.
-   On load, every visitor fetches it and merges into tweaks.
-   When the admin saves, the panel commits the new JSON via the
-   GitHub Contents API using a fine-grained PAT stored ONLY in
-   the admin's own browser (localStorage). After ~1 minute GitHub
-   Pages redeploys and visitors see the new state.
-   ───────────────────────────────────────────────────────────── */
-const GITHUB_REPO = "UnusualHatter/ruzowl-portfolio";  // owner/repo — edit if forked
+
+const GITHUB_REPO = "UnusualHatter/ruzowl-portfolio";
 const GITHUB_BRANCH = "main";
 const COMMISSIONS_FILE = "data/commissions.json";
 const PAT_STORAGE_KEY = "ruzowl_gh_pat";
-// Subset of tweak keys that get pushed to the public JSON. Visual personality
-// (sparkles, shimmer, tilt) and per-visitor prefs (dark, nsfw, lang) stay local.
+// Only the commission fields below are published to the shared JSON file.
 const PUBLISHED_KEYS = ["status", "slotsCurrent", "slotsMax", "iconPrice", "halfbodyPrice", "fullbodyPrice"];
 
 async function loadRemoteCommissions() {
@@ -48,7 +31,7 @@ async function publishToGitHub(values, pat) {
     "Accept": "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
   };
-  // Need the existing file's SHA for an update; absent SHA means "create new".
+  // GitHub Contents API updates require the current file SHA.
   let sha;
   const getRes = await fetch(`${url}?ref=${GITHUB_BRANCH}&t=${Date.now()}`, { headers, cache: "no-store" });
   if (getRes.ok) {
@@ -57,8 +40,7 @@ async function publishToGitHub(values, pat) {
     throw new Error(`Read failed (HTTP ${getRes.status})`);
   }
   const json = JSON.stringify(values, null, 2) + "\n";
-  // btoa(unescape(encodeURIComponent(...))) is the standard trick to base64
-  // arbitrary UTF-8 (raw btoa chokes on non-Latin1 bytes like emoji).
+  // GitHub expects the file body as base64-encoded text.
   const content = btoa(unescape(encodeURIComponent(json)));
   const body = {
     message: `chore(commissions): status=${values.status} slots=${values.slotsCurrent ?? "?"}/${values.slotsMax ?? "?"}`,
@@ -77,11 +59,7 @@ async function publishToGitHub(values, pat) {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
-   I18N — EN / PT-BR copy. Component-scoped sub-objects so each
-   section reads from t.<section>.<key>. Keep keys identical
-   across languages or callers will render undefined.
-   ───────────────────────────────────────────────────────────── */
+
 const TEXT = {
   en: {
     nav: {
@@ -130,11 +108,11 @@ const TEXT = {
       sub: "The home of my WIPs and funny art + a lot of 🦉 things.",
     },
     status: {
-      open: "Commissions open",
-      limited: "Limited slots",
-      ych: "YCH slots open",
-      closed: "Commissions closed",
-      slotsSuffix: (cur, max) => ` · ${cur}/${max} slots`,
+      open: "Commissions Open",
+      limited: "Limited Slots",
+      ych: "YCH Slots Open",
+      closed: "Commissions Closed",
+      slotsSuffix: (cur, max) => `: ${cur}/${max}`,
     },
     admin: {
       sectionLogin: "Admin login",
@@ -145,6 +123,10 @@ const TEXT = {
       sectionCommissions: "Commissions",
       sectionPrices: "Prices",
       labelStatus: "Status",
+      statusOpen: "open",
+      statusLimited: "lmtd slots",
+      statusYch: "YCH slots",
+      statusClosed: "Closed",
       labelSlotsCur: "Current slots",
       labelSlotsMax: "Max slots",
       labelIconPrice: "Icon price",
@@ -211,7 +193,7 @@ const TEXT = {
       limited: "Vagas limitadas",
       ych: "Vagas YCH abertas",
       closed: "Comissões fechadas",
-      slotsSuffix: (cur, max) => ` · ${cur}/${max} vagas`,
+      slotsSuffix: (cur, max) => `: ${cur}/${max}`,
     },
     admin: {
       sectionLogin: "Login admin",
@@ -222,6 +204,10 @@ const TEXT = {
       sectionCommissions: "Comissões",
       sectionPrices: "Preços",
       labelStatus: "Status",
+      statusOpen: "open",
+      statusLimited: "lmtd slots",
+      statusYch: "YCH slots",
+      statusClosed: "Closed",
       labelSlotsCur: "Vagas atuais",
       labelSlotsMax: "Vagas máximas",
       labelIconPrice: "Preço do ícone",
@@ -239,9 +225,7 @@ const TEXT = {
   },
 };
 
-/* ─────────────────────────────────────────────────────────────
-   CONTENT — sourced from repo data + spec
-   ───────────────────────────────────────────────────────────── */
+
 const ARTIST = {
   name: "RuzOwl",
   handle: "@ruzowl_red",
@@ -310,12 +294,9 @@ const GALLERY_NSFW = [
   { src: "assets/gallery-nsfw/08.jpg", label: "Commission" },
 ];
 
-/* ─────────────────────────────────────────────────────────────
-   NAV
-   ───────────────────────────────────────────────────────────── */
+
 function Nav({ status, slotsCurrent, slotsMax, dark, onToggleDark, nsfw, onToggleNsfw, lang, onToggleLang, t }) {
   const [scrolled, setScrolled] = useState(false);
-  // pulseKey re-mounts the ripple span on every click so the CSS animation re-triggers
   const [pulseKey, setPulseKey] = useState(0);
   const [isPulsing, setIsPulsing] = useState(false);
   useEffect(() => {
@@ -329,8 +310,6 @@ function Nav({ status, slotsCurrent, slotsMax, dark, onToggleDark, nsfw, onToggl
     onToggleNsfw();
     window.setTimeout(() => setIsPulsing(false), 620);
   };
-  // Build the status pill label: base copy from current language; append slot
-  // count when the status exposes availability numbers.
   const statusLabel = (() => {
     const base = t.status[status] || "";
     if ((status === "limited" || status === "ych") && typeof slotsCurrent === "number" && typeof slotsMax === "number") {
@@ -521,13 +500,11 @@ function Nav({ status, slotsCurrent, slotsMax, dark, onToggleDark, nsfw, onToggl
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   HERO
-   ───────────────────────────────────────────────────────────── */
+
 function Hero({ tweaks, t }) {
   return (
     <section id="top" style={{ position: "relative", paddingBottom: "var(--s-9)" }}>
-      {/* soft decorative blob behind hero */}
+      
       <div aria-hidden style={{
         position: "absolute", inset: "auto 0 0 0", height: 480, top: 60,
         background: "var(--hero-blob)",
@@ -579,7 +556,7 @@ function Hero({ tweaks, t }) {
           </div>
         </div>
 
-        {/* Avatar card */}
+        
         <div className="reveal in" style={{ position: "relative", justifySelf: "center" }}>
           <div style={{
             position: "relative",
@@ -608,7 +585,7 @@ function Hero({ tweaks, t }) {
                 animation: "float-y 5s ease-in-out infinite",
                 filter: "drop-shadow(0 16px 28px rgba(62,63,65,0.22))",
               }} />
-              {/* corner sticker */}
+              
               <div style={{
                 position: "absolute", bottom: 14, left: 14,
                 background: "var(--surface)", padding: "6px 12px",
@@ -621,7 +598,7 @@ function Hero({ tweaks, t }) {
                 {t.hero.sticker}
               </div>
             </div>
-            {/* gold tag — links to pricesheet */}
+            
             <a href="#prices" style={{
               position: "absolute", top: -14, right: -14,
               background: "linear-gradient(180deg, #f5cd72, #e9b346)",
@@ -651,9 +628,7 @@ function Hero({ tweaks, t }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   SECTION HEADER
-   ───────────────────────────────────────────────────────────── */
+
 function SectionHeader({ kicker, title, sub, align = "left" }) {
   return (
     <div className="reveal" style={{ textAlign: align, maxWidth: align === "center" ? 620 : "none", marginInline: align === "center" ? "auto" : 0, marginBottom: "var(--s-7)" }}>
@@ -678,11 +653,7 @@ function SectionHeader({ kicker, title, sub, align = "left" }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   GALLERY MODAL — full-screen image viewer.
-   Mounted inline by Gallery (no portal needed; section has no
-   transform ancestor so position:fixed escapes correctly).
-   ───────────────────────────────────────────────────────────── */
+
 function GalleryModal({ items, index, onClose, onPrev, onNext, t }) {
   useEffect(() => {
     const onKey = (e) => {
@@ -710,22 +681,16 @@ function GalleryModal({ items, index, onClose, onPrev, onNext, t }) {
       <button className="img-modal-nav next" onClick={(e) => { stop(e); onNext(); }} aria-label={t.gallery.modalNext}>›</button>
       <figure className="img-modal-fig" onClick={stop}>
         <img src={item.src} alt={item.label} />
-        <figcaption>
-          {item.label}
-          <span>/{String(index + 1).padStart(2, "0")}</span>
-        </figcaption>
       </figure>
     </div>
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   GALLERY — masonry-ish using CSS columns
-   ───────────────────────────────────────────────────────────── */
+
 function Gallery({ nsfw, t }) {
   const order = nsfw ? GALLERY_NSFW : GALLERY_SFW;
   const [openIdx, setOpenIdx] = useState(null);
-  // Reset modal when toggling SFW/NSFW so we never index into the wrong list.
+  // Reset the modal when switching modes so the active index stays valid.
   useEffect(() => { setOpenIdx(null); }, [nsfw]);
 
   const close = () => setOpenIdx(null);
@@ -734,7 +699,7 @@ function Gallery({ nsfw, t }) {
 
   return (
     <section id="gallery" style={{ padding: "var(--s-9) 0", background: "var(--cream)", position: "relative", overflow: "hidden" }}>
-      {/* big background numeral — editorial flourish */}
+      
       <div aria-hidden style={{
         position: "absolute", top: 32, right: -20,
         fontFamily: "var(--font-display)", fontWeight: 400,
@@ -769,7 +734,6 @@ function Gallery({ nsfw, t }) {
               <div className="g-frame">
                 <img src={g.src} alt={g.label} loading="lazy" />
                 <div className="g-overlay">
-                  <span className="g-label">{g.label}</span>
                   <span className="g-num">/{String(i + 1).padStart(2, "0")}</span>
                 </div>
               </div>
@@ -813,7 +777,7 @@ function Gallery({ nsfw, t }) {
           border-radius: var(--r-lg);
         }
 
-        /* ─── Full-screen image modal ─── */
+        
         @keyframes img-modal-in {
           from { opacity: 0; }
           to   { opacity: 1; }
@@ -855,20 +819,6 @@ function Gallery({ nsfw, t }) {
           object-fit: contain;
           border-radius: var(--r-lg);
           box-shadow: 0 24px 80px rgba(0,0,0,0.55);
-        }
-        .img-modal-fig figcaption {
-          color: var(--pink-soft);
-          font-family: var(--font-display);
-          font-style: italic;
-          font-size: 16px;
-          text-align: center;
-        }
-        .img-modal-fig figcaption span {
-          color: var(--gold);
-          font-family: var(--font-mono);
-          font-size: 11px;
-          letter-spacing: 0.06em;
-          margin-left: 10px;
         }
         .img-modal-close,
         .img-modal-nav {
@@ -940,14 +890,6 @@ function Gallery({ nsfw, t }) {
           gap: 12px;
         }
         .g-item:hover .g-overlay { opacity: 1; }
-        .g-label {
-          color: var(--pink-soft);
-          font-family: var(--font-display);
-          font-style: italic;
-          font-size: 18px;
-          font-weight: 500;
-          letter-spacing: -0.01em;
-        }
         .g-num {
           color: var(--gold);
           font-family: var(--font-mono);
@@ -959,9 +901,7 @@ function Gallery({ nsfw, t }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   PRICES
-   ───────────────────────────────────────────────────────────── */
+
 function PriceCard({ tier, idx, shimmer, display, price }) {
   const ref = useRef(null);
   const name = display?.name ?? tier.name;
@@ -1019,7 +959,7 @@ function PriceCard({ tier, idx, shimmer, display, price }) {
           {price ?? tier.price}
         </span>
         <span style={{ fontSize: 13, color: "var(--gray)", marginLeft: 6 }}>· {tier.delivery}</span>
-        {/* gold shimmer overlay */}
+        
         <div className="shimmer" aria-hidden style={{
           position: "absolute", inset: -6,
           background: "linear-gradient(110deg, transparent 30%, rgba(240,191,89,0.45) 50%, transparent 70%)",
@@ -1087,9 +1027,7 @@ function Prices({ tweaks, t }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   SOCIALS
-   ───────────────────────────────────────────────────────────── */
+
 function Socials({ t }) {
   return (
     <section id="socials" style={{ padding: "var(--s-9) 0", background: "var(--cream)" }}>
@@ -1146,13 +1084,7 @@ function Socials({ t }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   FOOTER — minimal closing slab. Hosts a discreet "admin" entry
-   that fires the same postMessage the host edit-toolbar does, so
-   the panel can be opened from inside the page itself.
-   Designed to fade into the background: muted text, low contrast,
-   gently lifts on hover. Should not pull a regular visitor's eye.
-   ───────────────────────────────────────────────────────────── */
+
 function Footer() {
   const openAdmin = () => {
     window.postMessage({ type: "__activate_edit_mode" }, "*");
@@ -1212,18 +1144,14 @@ function Footer() {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   PUBLISH TO GITHUB — pushes the commission subset of tweaks to
-   data/commissions.json via the GitHub Contents API. PAT lives
-   in the admin's localStorage only; visitors only ever fetch the
-   resulting public JSON.
-   ───────────────────────────────────────────────────────────── */
+
 function PublishToGitHub({ tweaks, t }) {
   const [pat, setPat] = useState(() => {
     try { return localStorage.getItem(PAT_STORAGE_KEY) || ""; } catch { return ""; }
   });
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null); // { kind: "ok" | "err" | "info", text }
+  // Local feedback keeps publish status visible without adding extra chrome.
+  const [msg, setMsg] = useState(null);
 
   const savePat = (v) => {
     setPat(v);
@@ -1287,16 +1215,11 @@ function PublishToGitHub({ tweaks, t }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   ADMIN LOGIN — gates TweaksPanel content. Hardcoded password,
-   no backend; this is just a casual-visitor barrier. Auth state
-   persists in localStorage so refresh doesn't kick the admin out.
-   Styled with the existing `.twk-*` classes so it lives inside
-   the panel without visual seams.
-   ───────────────────────────────────────────────────────────── */
+
 function AdminLogin({ onLogin, t }) {
   const [pw, setPw] = useState("");
   const [error, setError] = useState(false);
+  // This is a convenience gate for the panel, not a security boundary.
   const submit = (e) => {
     e.preventDefault();
     if (pw === ADMIN_PASSWORD) {
@@ -1329,18 +1252,15 @@ function AdminLogin({ onLogin, t }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   APP
-   ───────────────────────────────────────────────────────────── */
+
 function App() {
   const [tweaks, setTweak] = useTweaks(window.TWEAK_DEFAULTS);
-  // Visitor-facing language preference — kept out of the tweaks system because
-  // tweaks are admin-controlled and persisted on disk; language is per-visitor.
+  // Visitor preferences stay local and do not get written into shared tweaks.
   const [lang, setLang] = useState(() => {
     try { return localStorage.getItem(LANG_STORAGE_KEY) || "en"; }
     catch { return "en"; }
   });
-  // Admin auth — also localStorage; intentionally not in tweaks.
+  // Admin auth persists locally so a refresh does not close the panel.
   const [authed, setAuthed] = useState(() => {
     try { return localStorage.getItem(AUTH_STORAGE_KEY) === "1"; }
     catch {
@@ -1350,9 +1270,7 @@ function App() {
   });
 
   const t = TEXT[lang] || TEXT.en;
-
-  // Load remote commissions from GitHub on first mount, merge into tweaks.
-  // This ensures all visitors see the latest published state.
+  // Pull the latest published commission data on first load.
   useEffect(() => {
     loadRemoteCommissions().then((data) => {
       if (data) {
@@ -1361,7 +1279,6 @@ function App() {
         });
       }
     }).catch(() => {
-      // Network errors are silent; site works offline + with stale cache.
     });
   }, []);
 
@@ -1419,10 +1336,10 @@ function App() {
               label={t.admin.labelStatus}
               value={tweaks.status}
               options={[
-                { value: "open", label: t.status.open },
-                { value: "limited", label: t.status.limited },
-                { value: "ych", label: t.status.ych },
-                { value: "closed", label: t.status.closed },
+                { value: "open", label: t.admin.statusOpen },
+                { value: "limited", label: t.admin.statusLimited },
+                { value: "ych", label: t.admin.statusYch },
+                { value: "closed", label: t.admin.statusClosed },
               ]}
               onChange={(v) => setTweak("status", v)}
             />

@@ -1,11 +1,7 @@
-// components.jsx — shared primitives for ZoKioZhi portfolio
-// Buttons, cards, badges, sparkles, section frame, icons.
 
 const { useEffect, useRef, useState } = React;
 
-/* ─────────────────────────────────────────────────────────────
-   ICONS — minimal, rounded line-set. 1.5px stroke @24px.
-   ───────────────────────────────────────────────────────────── */
+
 const iconBase = {
   width: 20, height: 20, viewBox: "0 0 24 24",
   fill: "none", stroke: "currentColor", strokeWidth: 1.7,
@@ -30,9 +26,7 @@ const Icon = {
   Moon: (p) => (<svg {...iconBase} {...p}><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></svg>),
 };
 
-/* ─────────────────────────────────────────────────────────────
-   BUTTON
-   ───────────────────────────────────────────────────────────── */
+
 function Button({ kind = "primary", size = "md", href, children, icon, onClick, type, ariaLabel, style: styleOverride, ...rest }) {
   const styles = {
     base: {
@@ -104,15 +98,9 @@ function Button({ kind = "primary", size = "md", href, children, icon, onClick, 
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   STATUS PILL — open / limited / closed
-   ───────────────────────────────────────────────────────────── */
+
 function StatusPill({ status, onDark = false, label }) {
-  // All four states read from CSS vars defined per theme in index.html. The
-  // dark themes attach a glow via --status-*-glow so open/limited stay
-  // legible against the dark surface, matching ych/closed.
-  // The legacy `onDark` prop is accepted but ignored — kept so external
-  // callers don't break.
+  // Theme variables keep the pill consistent across all four mode combinations.
   const cfg = {
     open:    { dot: "var(--status-open-dot)",    label: "Commissions open",   bg: "var(--status-open-bg)",    color: "var(--status-open-color)",    border: "var(--status-open-border)",    glow: "var(--status-open-glow)" },
     limited: { dot: "var(--status-limited-dot)", label: "Limited slots",      bg: "var(--status-limited-bg)", color: "var(--status-limited-color)", border: "var(--status-limited-border)", glow: "var(--status-limited-glow)" },
@@ -140,9 +128,7 @@ function StatusPill({ status, onDark = false, label }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   BADGE — small purple/gold/neutral chip
-   ───────────────────────────────────────────────────────────── */
+
 function Badge({ tone = "neutral", children, icon }) {
   const tones = {
     neutral: { bg: "rgba(62,63,65,0.06)", color: "var(--charcoal)" },
@@ -163,9 +149,7 @@ function Badge({ tone = "neutral", children, icon }) {
   );
 }
 
-/* ─────────────────────────────────────────────────────────────
-   SPARKLES — signature ambient animation around hero avatar
-   ───────────────────────────────────────────────────────────── */
+
 function Sparkles({ count = 8, enabled = true }) {
   if (!enabled) return null;
   const items = Array.from({ length: count }).map((_, i) => {
@@ -195,9 +179,7 @@ function Sparkles({ count = 8, enabled = true }) {
   return <div aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>{items}</div>;
 }
 
-/* ─────────────────────────────────────────────────────────────
-   IntersectionObserver hook — adds .in to .reveal elements
-   ───────────────────────────────────────────────────────────── */
+
 function useReveal() {
   useEffect(() => {
     const els = document.querySelectorAll(".reveal");
@@ -214,12 +196,9 @@ function useReveal() {
   }, []);
 }
 
-/* ─────────────────────────────────────────────────────────────
-   PLACEHOLDER ART — soft striped gradient with mono caption.
-   Used for gallery tiles since we don't have real images.
-   ───────────────────────────────────────────────────────────── */
+
 function ArtPlaceholder({ label, hue = 0, ratio = "1/1" }) {
-  // Stay in palette: alternate pink / cream / purple-tint / gold-tint backgrounds.
+  // Placeholder art stays inside the same palette as the rest of the site.
   const palettes = [
     { bg: "linear-gradient(135deg, #fceff0 0%, #eedddf 100%)", stripe: "rgba(143,43,163,0.08)" },
     { bg: "linear-gradient(135deg, #f0e2f3 0%, #eedddf 100%)", stripe: "rgba(62,63,65,0.06)" },
